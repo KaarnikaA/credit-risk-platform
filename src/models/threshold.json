@@ -1,1 +1,1 @@
-{"threshold": 0.19123513996601105}
+{"best_threshold": 0.2171488106250763, "method": "youden_j", "source": "validation"}

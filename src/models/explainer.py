@@ -2,10 +2,44 @@ import shap
 import joblib
 import pandas as pd
 import numpy as np
+import mlflow.pyfunc
+from mlflow.tracking import MlflowClient
 
-# Load trained model
-model = joblib.load("model.pkl")
+# Load trained model from local
+#model = joblib.load("model.pkl")
 
+#from ml flow
+MODEL_NAME = "credit_risk_model"
+
+client = MlflowClient(tracking_uri="http://127.0.0.1:5000")
+
+# get all versions
+versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+
+# pick latest version number
+latest_version = max(versions, key=lambda v: int(v.version))
+
+# load model
+#model_uri = f"models:/{MODEL_NAME}/{latest_version.version}"
+# = mlflow.pyfunc.load_model(model_uri)
+
+from mlflow.tracking import MlflowClient
+
+MLFLOW_URI = "http://127.0.0.1:5000"
+MODEL_NAME = "credit_risk_model"
+
+mlflow.set_tracking_uri(MLFLOW_URI)
+
+client = MlflowClient()
+
+versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+latest_version = max(versions, key=lambda v: int(v.version))
+
+MODEL_URI = f"models:/{MODEL_NAME}/{latest_version.version}"
+import mlflow.xgboost
+
+model = mlflow.xgboost.load_model(MODEL_URI)
+explainer = shap.TreeExplainer(model)
 # TreeExplainer works well with XGBoost
 explainer = shap.TreeExplainer(model)
 
@@ -14,9 +48,8 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 def get_shap_values(X: pd.DataFrame):
-    
     shap_values = explainer.shap_values(X)
-    return shap_values
+    return shap_values, explainer
 # we get matrix of (n_samples, n_features)
 
 
@@ -43,7 +76,7 @@ def get_top_features(X: pd.DataFrame, shap_values, top_n=3):
 
 
 #easy  human interpertation
-def format_explanations_pretty(X, shap_values, top_features, explainer):
+def format_explanations(X, shap_values, top_features, explainer):
     explanations = []
 
     #avg prediction value

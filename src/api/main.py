@@ -1,72 +1,228 @@
+# from fastapi import FastAPI
+# import pandas as pd
+# import joblib
+# import json
+
+# from src.api.schema import LoanRequest
+# from src.features.engineering import create_features
+# from src.decision.engine import decide
+# from src.decision.scoring import probability_to_score
+
+# from src.models.explainer import (
+#     get_shap_values,
+#     get_top_features,
+#     format_explanations
+# )
+# import mlflow
+# from src.config.mlflow_config import init_mlflow
+# init_mlflow()
+
+# app = FastAPI(title="Credit Risk API")
+
+# # Load model
+# #model = joblib.load("model.pkl")
+
+
+# @app.post("/score")
+# def score(request: LoanRequest):
+
+#     # Convert input to dataframe
+#     df = pd.DataFrame([request.dict()])
+
+#     # Feature engineering
+#     df = create_features(df)
+
+#     feature_cols = [
+#         "annual_inc",
+#         "loan_amnt",
+#         "dti",
+#         "loan_to_income",
+#         "dti_ratio",
+#         "log_income",
+#         "log_loan",
+#         "income_bucket",
+#         "loan_bucket",
+#         "income_x_dti",
+#         "loan_x_dti",
+#         "high_dti_flag",
+#         "low_income_flag",
+#         "high_loan_flag"
+#     ]
+
+#     X = df[feature_cols]
+
+#     # Prediction
+#     prob = model.predict(X)[0]
+#     # SHAP
+#     # Get SHAP values + explainer (depends on your implementation)
+#     shap_vals, explainer = get_shap_values(X)
+
+#     # Extract top features
+#     top_feats = get_top_features(X, shap_vals)
+
+#     # Format explanations properly
+#     explanations = format_explanations(
+#         X,
+#         shap_vals,
+#         top_feats,
+#         explainer
+#     )[0]
+#     # Threshold - local file
+#     # with open("threshold.json") as f:
+#     #     threshold = json.load(f)["threshold"]
+
+#     # decision = decide(
+#     #     prob,
+#     #     income=request.annual_inc,
+#     #     loan_amnt=request.loan_amnt,
+#     #     dti=request.dti,
+#     #     threshold=threshold
+#     # )
+ 
+
+#     client = MlflowClient()
+
+#     MODEL_NAME = "credit_risk_model"
+
+#     versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+#     latest_version = max(versions, key=lambda v: int(v.version))
+
+#     model = mlflow.pyfunc.load_model(
+#         f"models:/{MODEL_NAME}/{latest_version.version}"
+#     )
+
+#     run = client.get_run(latest_version.run_id)
+#     threshold = float(run.data.params["best_threshold"])
+        
+#     score = probability_to_score(prob)
+
+
+
+
+#     return {
+#         "borrower_id": request.borrower_id,
+#         "probability_of_default": float(prob),
+#         "credit_score": score,
+#         "decision": decision,
+#         "explanations": explanations
+#     }  
+
+
 from fastapi import FastAPI
 import pandas as pd
-import joblib
-import json
-from src.decision.scoring import probability_to_score
+import mlflow
+from mlflow.tracking import MlflowClient
 
 from src.api.schema import LoanRequest
 from src.features.engineering import create_features
 from src.decision.engine import decide
+from src.decision.scoring import probability_to_score
+
 from src.models.explainer import (
     get_shap_values,
     get_top_features,
     format_explanations
 )
 
+from src.config.mlflow_config import init_mlflow
+
+# ---------------------------
+# INIT
+# ---------------------------
+init_mlflow()
+
 app = FastAPI(title="Credit Risk API")
 
-# Load model
-model = joblib.load("model.pkl")
+MODEL_NAME = "credit_risk_model"
+
+client = MlflowClient()
+
+# Load latest model ONCE at startup
+versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+latest_version = max(versions, key=lambda v: int(v.version))
+
+model_uri = f"models:/{MODEL_NAME}/{latest_version.version}"
+import mlflow.xgboost
+
+model = mlflow.xgboost.load_model(model_uri)
+# Get threshold ONCE at startup
+run = client.get_run(latest_version.run_id)
+threshold = float(run.data.params["best_threshold"])
 
 
+# ---------------------------
+# FEATURE COLUMNS
+# ---------------------------
+feature_cols = [
+    "annual_inc",
+    "loan_amnt",
+    "dti",
+    "loan_to_income",
+    "dti_ratio",
+    "log_income",
+    "log_loan",
+    "income_bucket",
+    "loan_bucket",
+    "income_x_dti",
+    "loan_x_dti",
+    "high_dti_flag",
+    "low_income_flag",
+    "high_loan_flag"
+]
+
+
+# ---------------------------
+# ENDPOINT
+# ---------------------------
 @app.post("/score")
 def score(request: LoanRequest):
 
+    # Convert input to DataFrame
     df = pd.DataFrame([request.dict()])
 
+    # Feature engineering
     df = create_features(df)
-    feature_cols = [
-        "annual_inc",
-        "loan_amnt",
-        "dti",
-        "loan_to_income",
-        "dti_ratio",
-        "log_income",
-        "log_loan",
-        "income_bucket",
-        "loan_bucket",
-        "income_x_dti",
-        "loan_x_dti",
-        "high_dti_flag",
-        "low_income_flag",
-        "high_loan_flag"
-    ]
 
     X = df[feature_cols]
 
-    prob = model.predict_proba(X)[0][1]
-
-
-    shap_vals = get_shap_values(X)
+    # ---------------------------
+    # PREDICTION
+    # ---------------------------
+    prob = model.predict_proba(X)[:, 1][0]
+    print("MODEL OUTPUT:", model.predict(X)[0])
+    # ---------------------------
+    # SHAP EXPLANATIONS
+    # ---------------------------
+    shap_vals, explainer = get_shap_values(X)
     top_feats = get_top_features(X, shap_vals)
-    explanations = format_explanations(top_feats)[0]
 
-    with open("threshold.json") as f:
-        threshold = json.load(f)["threshold"]
- 
+    explanations = format_explanations(
+        X,
+        shap_vals,
+        top_feats,
+        explainer
+    )[0]
+
+    # ---------------------------
+    # DECISION LOGIC
+    # ---------------------------
     decision = decide(
-    prob,
-    income=request.annual_inc,
-    loan_amnt=request.loan_amnt,
-    dti=request.dti,
-    threshold=threshold
-)
+        prob,
+        income=request.annual_inc,
+        loan_amnt=request.loan_amnt,
+        dti=request.dti,
+        threshold=threshold
+    )
 
+    # ---------------------------
+    # FINAL SCORE
+    # ---------------------------
     score = probability_to_score(prob)
 
     return {
-    "probability_of_default": float(prob),
-    "credit_score": score,
-    "decision": decision,
-    "explanations": explanations
-}
+        "borrower_id": request.borrower_id,
+        "probability_of_default": float(prob),
+        "credit_score": score,
+        "decision": decision,
+        "explanations": explanations
+    }
