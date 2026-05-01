@@ -4,40 +4,19 @@ import pandas as pd
 import numpy as np
 import mlflow.pyfunc
 from mlflow.tracking import MlflowClient
+import mlflow.xgboost
 
-# Load trained model from local
-#model = joblib.load("model.pkl")
+
 
 #from ml flow
 MODEL_NAME = "credit_risk_model"
-
 client = MlflowClient(tracking_uri="http://127.0.0.1:5000")
-
 # get all versions
 versions = client.search_model_versions(f"name='{MODEL_NAME}'")
-
 # pick latest version number
 latest_version = max(versions, key=lambda v: int(v.version))
-
-# load model
-#model_uri = f"models:/{MODEL_NAME}/{latest_version.version}"
-# = mlflow.pyfunc.load_model(model_uri)
-
-from mlflow.tracking import MlflowClient
-
-MLFLOW_URI = "http://127.0.0.1:5000"
-MODEL_NAME = "credit_risk_model"
-
-mlflow.set_tracking_uri(MLFLOW_URI)
-
-client = MlflowClient()
-
-versions = client.search_model_versions(f"name='{MODEL_NAME}'")
-latest_version = max(versions, key=lambda v: int(v.version))
-
 MODEL_URI = f"models:/{MODEL_NAME}/{latest_version.version}"
-import mlflow.xgboost
-
+mlflow.set_tracking_uri(MLFLOW_URI)
 model = mlflow.xgboost.load_model(MODEL_URI)
 explainer = shap.TreeExplainer(model)
 # TreeExplainer works well with XGBoost
